@@ -1,0 +1,1074 @@
+---
+title: 
+author: 
+date:  \today
+params:
+  lang: ES
+lang: "`r switch(params$lang, ES = 'es-ES', EN = 'en-US')`"
+output:
+  pdf_document:  
+    toc_depth: 3
+    number_sections: yes
+  language:
+  label:
+    fig: 'Figura '
+    tab: 'Tabla '
+    eq: 'Ecuación '
+    def: 'Definición '
+header-includes: \usepackage{float}
+                 \usepackage{pagecolor}
+                 \graphicspath{{figures/}}
+                 \usepackage{framed}
+                 
+---
+
+
+<br><br>
+
+\begin{center}
+\includegraphics{etseUV.pdf}
+\end{center}
+
+
+
+\begin{center}
+\Huge{Construcción de una base de }
+\end{center}
+\begin{center}
+\Huge{tarifa de seguros de automóviles}
+\end{center}
+\begin{center}
+\large{Francisco M. Pérez Sánchez}
+
+\end{center}
+
+\thispagestyle{empty} 
+
+\newpage
+
+\pagenumbering{roman}
+\tableofcontents
+\newpage 
+\listoffigures
+\newpage 
+\listoftables
+\newpage 
+\pagenumbering{arabic}
+\setcounter{page}{1}
+
+```{r Cargar Packages, include=FALSE}
+# Especificamos las librerías necesarias en esta lista 
+packages = c("ggplot2","tidyr","pander","dplyr","pscl")
+#use this function to check if each package is on the local machine
+#if a package is installed, it will be loaded
+#if any are not, the missing package(s) will be installed and loaded 
+instalar <- function(x) {
+  if (!require(x, character.only = TRUE)) { 
+    install.packages(x, dependencies = TRUE)
+    library(x, character.only = TRUE) 
+  } 
+}
+package.check <- lapply(packages, FUN = instalar) 
+``` 
+
+```{r setup, include=FALSE}
+train <- readRDS(file = "RawData/Train")
+test <- readRDS(file = "RawData/Test") 
+data <- readRDS(file = "RawData/data") 
+prediccion_zeroinfl <- readRDS(file = "RawData/prediccion.RDS")
+```
+
+```{r Figura numerosi barplot, eval=FALSE, warning=FALSE, include=FALSE}
+#Crear dataset con cada conjunto
+tableTrain <- as.data.frame(table(train$numerosi))
+#Unir dataset y transformar
+tbl <- data.frame(
+    Casos = tableTrain$Var1,
+    Incidencias = tableTrain$Freq)
+tbl$Porcentajes <- paste(round(tbl$Incidencias/sum(tbl$Incidencias)*100,3),"%")
+#Generar y salvar figura
+ggsave(filename = "figures/numerosi_barplot.png", plot = 
+ggplot(data = tbl, aes(x = Casos, y = Incidencias)) +
+  geom_bar(
+    stat = "identity",
+    color = "white",
+    position = position_dodge(),
+    show.legend = F,
+    width=1,
+    fill= '#4682B4'
+  ) +
+  geom_text(
+    aes(label = Porcentajes),
+    vjust = -0.1,
+    position = position_dodge(width = 1.1),
+    color = "black",
+    size = 3
+  ) +
+  theme_minimal()
+,device = "png"
+)
+```
+
+```{r Figura Comparacion TRAIN-TEST, eval=FALSE, include=FALSE}
+#Crear dataset con cada conjunto
+tableTrain <- as.data.frame(table(train$numerosi))
+tableTest <- as.data.frame(table(test$numerosi))
+#Unir dataset y transformar
+if (max(as.numeric(tableTrain$Var1)) > max(as.numeric(tableTest$Var1))) {
+  tbl <- data.frame(
+    Casos = tableTrain$Var1,
+    Entrenamiento = tableTrain$Freq,
+    Test = c(ttableTest$Freq,rep(0,length(tableTrain$Var1)-length(tableTest$Var1))),
+  )
+} else {
+   tbl <- data.frame(
+    Casos = tableTest$Var1,
+    Entrenamiento = c(tableTrain$Freq,rep(0,length(tableTest$Var1)-length(tableTrain$Var1))),
+    Test = tableTest$Freq
+  )
+}
+tbl  <- gather(data = tbl, key = Partición, value = Incidencias, Test,Entrenamiento)
+##Asignamos porcentajes
+tbl$Porcentajes <- c(round(tbl$Incidencias[tbl$Partición=="Entrenamiento"]/sum(tbl$Incidencias[tbl$Partición=="Entrenamiento"])*100,1),round(tbl$Incidencias[tbl$Partición=="Test"]/sum(tbl$Incidencias[tbl$Partición=="Test"])*100,1))
+
+for (i in seq_along(tbl$Porcentajes)) {
+  if (isTRUE(tbl$Porcentajes[i]<4)) {
+    tbl$Porcentajes[i] <- 0
+  }
+}
+tbl$Porcentajes <-
+  c(paste(tbl$Porcentajes[1:3], "%"),
+    rep("", 11),
+    paste(tbl$Porcentajes[15:17], "%"),
+    rep("", 11))
+#Generar y salvar figura
+ggsave(filename = "figures/TrainTest.png", plot = 
+ggplot(data = tbl, aes(x = Partición, y = Incidencias, fill = Casos)) +
+  geom_bar(
+    stat = "identity",
+    color = "white",
+    position = position_dodge(),
+    show.legend = F,
+    width=1.2
+  ) +
+  geom_text(
+    aes(label = Porcentajes),
+    vjust = -0.1,
+    position = position_dodge(width = 1.1),
+    color = "black",
+    size = 3
+  ) +
+  annotate("text", x=0.44, y=-12, label= "0", size = 3) +
+  annotate("text", x=0.53, y=-12, label= "1", size = 3) +
+  annotate("text", x=0.61, y=-12, label= "2", size = 3) +
+  annotate("text", x=0.7, y=-12, label= "3", size = 3) +
+  annotate("text", x=0.79, y=-12, label= "4", size = 3) +
+  annotate("text", x=0.87, y=-12, label= "5", size = 3) +
+  annotate("text", x=0.95, y=-12, label= "6", size = 3) +
+  annotate("text", x=1.02, y=-12, label= "7", size = 3) +
+  annotate("text", x=1.08, y=-12, label= "8", size = 3) +
+  annotate("text", x=1.14, y=-12, label= "9", size = 3) +
+  annotate("text", x=1.19, y=-12, label= "10", size = 3) +
+  annotate("text", x=1.25, y=-12, label= "11", size = 3) +
+  annotate("text", x=1.31, y=-12, label= "12", size = 3) +
+  annotate("text", x=1.36, y=-12, label= "13", size = 3) +
+  annotate("text", x=1.44, y=-12, label= "0", size = 3) +
+  annotate("text", x=1.53, y=-12, label= "1", size = 3) +
+  annotate("text", x=1.62, y=-12, label= "2", size = 3) +
+  annotate("text", x=1.71, y=-12, label= "3", size = 3) +
+  annotate("text", x=1.79, y=-12, label= "4", size = 3) +
+  annotate("text", x=1.88, y=-12, label= "5", size = 3) +
+  annotate("text", x=1.96, y=-12, label= "6", size = 3) +
+  annotate("text", x=2.05, y=-12, label= "7", size = 3) +
+  annotate("text", x=2.12, y=-12, label= "8", size = 3) +
+  annotate("text", x=2.20, y=-12, label= "9", size = 3) +
+  annotate("text", x=2.28, y=-12, label= "10", size = 3) +
+  annotate("text", x=2.35, y=-12, label= "11", size = 3) +
+  annotate("text", x=2.41, y=-12, label= "12", size = 3) +
+  annotate("text", x=2.46, y=-12, label= "13", size = 3) +
+  scale_fill_manual(values = c(rep('#4682B4', 14))) +
+  theme_minimal()
+,device = "png"
+)
+```
+
+```{r Plot temporal Inicio poliza, eval=FALSE, include=FALSE}
+total <- table(train$iniciop)
+tbl <- data.frame(
+  fecha = unique(train$iniciop),
+  frecuencia = total[1:1093]
+)
+tbl$frecuencia.Var1 <- as.Date(tbl$frecuencia.Var1)
+colnames(tbl) <- c("FECHA","Fecha","Frencuencia")
+tbl <- tbl %>% select(Fecha, Frencuencia)
+max(tbl$Frencuencia)
+tbl <- tbl[-1,]
+tbl <- tbl[-728,]
+tbl <- tbl[-364,]
+
+ggsave(
+  filename = "figures/SerieInicio.png",
+  plot =
+    ggplot(data = tbl, aes(
+      x = Fecha, y = Frencuencia, fill = Frencuencia
+    )) +
+    geom_line(color = "#4682B4", size = 0.5) +
+    theme_minimal()
+  ,
+  device = "png"
+)
+```
+
+```{r Plot temporal Final poliza, eval=FALSE, include=FALSE}
+total <- table(train$final)
+tbl <- data.frame(
+  fecha = unique(train$finalp),
+  frecuencia = total[1:1096]
+)
+tbl$frecuencia.Var1 <- as.Date(tbl$frecuencia.Var1)
+colnames(tbl) <- c("FECHA","Fecha","Frencuencia")
+tbl <- tbl %>% select(Fecha, Frencuencia)
+max(tbl$Frencuencia)
+tbl <- tbl[-1096,]
+tbl <- tbl[-366,]
+tbl <- tbl[-730,]
+
+ggsave(
+  filename = "figures/SerieFinal.png",
+  plot =
+    ggplot(data = tbl, aes(
+      x = Fecha, y = Frencuencia, fill = Frencuencia
+    )) +
+    geom_line(color = "#4682B4", size = 0.5) +
+    theme_minimal()
+  ,
+  device = "png"
+)
+```
+
+```{r Analisis NUMEROSI, eval=FALSE, include=FALSE}
+# ¿Eliminamos los que están cero días expuestos
+table(train$numerosi[train$duracion==0]) 
+train[train$duracion==0 & train$numerosi==1,] 
+train <- train[train$duracion != 0, ]
+
+
+table(test$numerosi[test$duracion==0]) 
+test[test$duracion==0 & test$numerosi==1,] 
+test <- test[test$duracion != 0, ]
+#detach("package:MASS", unload = TRUE)
+
+train <- train %>% select(tipovehi,plazasvehi,sexocondu,numerosi,prov,duracion,Rango_Potencia,Rango_ValorVehiculo,Rango_Antiguedad,Rango_Edad,Rango_Experiencia,Rango_Permanencia)
+
+test <- test %>% select(tipovehi,plazasvehi,sexocondu,numerosi,prov,duracion,Rango_Potencia,Rango_ValorVehiculo,Rango_Antiguedad,Rango_Edad,Rango_Experiencia,Rango_Permanencia)
+
+
+
+formula1 <- numerosi ~ Rango_Potencia + Rango_ValorVehiculo + Rango_antigüedad +
+             tipovehi + plazasvehi + Rango_Edad + Rango_Experiencia +
+             sexocondu + Rango_Permanencia + prov + duracion
+
+formula2 <- numerosi ~ Rango_Potencia + Rango_ValorVehiculo + Rango_antigüedad +
+             tipovehi + plazasvehi + Rango_Edad + Rango_Experiencia +
+             sexocondu + Rango_Permanencia + prov
+
+
+### ----------------------------- MODELOS SIN REGULARIZACIÓN
+
+# Poisson LOG e INDENTITY
+Po.log_formula1 <- glm(formula1, data = train,family=poisson(link="log"))
+AIC(Po.log_formula1)#AIC: 118011
+
+
+starting.values <- coef(Po.log_formula1)
+starting.values[starting.values < 0] <- 0.0001
+
+Po.id_formula1 <- glm(formula1, data= train,
+             start=starting.values,
+             family=poisson(link="identity"))
+AIC(Po.id_formula1)#AIC: 135529.7
+
+
+ # BINOMIAL NEGATIVA
+library(MASS)
+BN.log_formula1 <- glm.nb(formula1 , data= train, link = log)
+AIC(BN.log_formula1)#AIC: 113108.8
+
+# AJUSTE A UNA POISSON TRUNCADA EN CERO
+
+ZI.Po_formula1 <- zeroinfl(formula1, data=train, dist="poisson")
+AIC(ZI.Po_formula1)#AIC: 113414.7
+
+ZI.BN_formula1 <- zeroinfl(formula1, data=train, dist="negbin")
+AIC(ZI.BN_formula1)#AIC: 111794.8
+
+
+# NORMAL
+
+No.id_formula1 <- glm(formula1, data=train)
+AIC(No.id_formula1)#AIC: 173821.4
+
+
+No.log_formula1 <- glm(formula1, data=train, start = coef(No.id_formula1),
+family=gaussian(link="log"))
+AIC(No.log_formula1)#AIC: 173409.5
+
+
+# Poisson con offset   QUITAR LA VARIABLE DURACION DEL DATASET, NO?
+
+Po.log.off_formula1 <- glm(formula1,
+                data = train,
+                offset = log(train$duracion),
+                family = poisson(link="log"))
+AIC(Po.log.off_formula1) # AIC: 116999.7
+
+Po.log.off_formula2 <- glm(formula2,
+                data = train,
+                offset = log(train$duracion),
+                family = poisson(link="log"))
+AIC(Po.log.off_formula2) # AIC: 117000.9
+
+
+# Poisson con pesos  QUITAR LA VARIABLE DURACION DEL PESO 
+
+Po.log.wgt_formula1 <- glm(formula1,
+                data = train,
+                weight = train$duracion,
+                family = poisson(link="log"))
+AIC(Po.log.wgt_formula1)*nrow(train)/sum(train$duracion) #AIC: 141960.3
+
+Po.log.wgt_formula2 <- glm(formula2,
+                data = train,
+                weight = train$duracion,
+                family = poisson(link="log"))
+AIC(Po.log.wgt_formula2)*nrow(train)/sum(train$duracion) #AIC: 147375.3
+
+
+### ----------------------------- MODELOS CON REGULARIZACIÓN
+# Convertimos los data.frame en objetos matriz respetando factores
+train.m1 <- model.matrix(~., data = train)
+train.m1 <- train.m1[,colnames(train.m1) != "numerosi"]
+
+test.m1 <- model.matrix(~.,data = test)
+test.m1 <- test.m1[,colnames(test.m1) != "numerosi"]
+
+#Estimamos los modelos con penalizacion
+# Existe una solucion por cada valor del parametro de penalización library(glmnet)
+library(glmnet)
+
+No.re_glmnet <- glmnet::glmnet(x = train.m1, y = train$numerosi, alpha=0.5)
+Po.re_glmnet <- glmnet::glmnet(x = train.m1, y = train$numerosi,family = "poisson", alpha=0.5)
+Po.re.off_glmnet <- glmnet::glmnet(x = train.m1, y = train$numerosi, alpha = 0.5,offset = log(train$duracion), family = "poisson")
+
+library(mpath)
+
+#Po.re2_mpath <- mpath::glmreg(numerosi ~ . , data = train, family = "poisson", penalty="enet")#Error: la memoria vectorial está agotada (se alcanzó el límite?)
+BN.re_mpath <- mpath::glmregNB(numerosi ~ . , data = train, penalty="enet")
+ZI.Po.re_mpath <-  mpath::zipath(numerosi ~ .| . , data= train, family = "poisson", link = "logit", penalty="enet")
+ZI.BN.re_mpath <-  mpath::zipath(numerosi ~ .| . , data= train,family = "negbin", link = "logit", penalty="enet")
+
+### ----------------------------- CROSS-VALIDATION
+ # Ajuste de modelos por cross-validation
+cv.No <- glmnet::cv.glmnet(x=train.m1, y=train$numerosi, alpha=0.5)
+cv.Po <- glmnet::cv.glmnet(x=train.m1, y=train$numerosi, alpha=0.5, family = "poisson")
+cv.Po.off <- glmnet::cv.glmnet(x = train.m1, y = train$numerosi, alpha = 0.5, family = "poisson",offset = log(train$duracion))
+#cv.Po2 <-mpath::cv.glmreg(numerosi ~ . , data = train, family="poisson",penalty = "enet")#Error: la memoria vectorial está agotada (se alcanzó el límite?)
+
+ # Ajuste de modelos por cross-validation
+cv.BN <- mpath::cv.glmregNB(numerosi ~ . , data= train,penalty="enet")
+cv.BN.off <- mpath::cv.glmregNB(formula2, data = train,offset = log(train$duracion))
+#cv.ZI.Po <- mpath::cv.zipath(numerosi ~ .| .  , data= train,family="poisson", link = "logit",penalty="enet")
+#cv.ZI.Po.off <- mpath::cv.zipath(formula2, data= train, link = "logit",family = "poisson", penalty="enet",offset = log(train$duracion))
+#cv.ZI.BN <- mpath::cv.zipath(numerosi ~ .| . , data= train,family="negbin", link = "logit",penalty="enet")
+#cv.ZI.BN.off <- mpath::cv.zipath(formula2, data= train, link = "logit",family = "negbin", penalty="enet",offset = log(train$duracion))
+
+
+save.image(file = "RawData/my_work_space.RData")
+
+```
+
+```{r Predicciones, eval=FALSE, include=FALSE}
+# Predicciones
+p.Po.log_formula1 <- predict(Po.log_formula1, test , type="response")
+p.Po.id_formula1 <- predict(Po.id_formula1, test , type="response")
+p.BN.log_formula1 <- predict(BN.log_formula1, test , type="response")
+p.ZI.Po_formula1 <- stats::predict(ZI.Po_formula1, test , type="response")
+p.ZI.BN_formula1 <- predict(ZI.BN_formula1, test , type="response")
+p.No.id_formula1 <- predict(No.id_formula1, test , type="response")
+p.No.log_formula1 <- predict(No.log_formula1, test , type="response")
+p.Po.log.wgt_formula1 <- predict(Po.log.wgt_formula1, test, type = "response")
+p.Po.log.wgt_formula2 <- predict(Po.log.wgt_formula2, test, type = "response")
+
+nd <- data.frame(test, of_var = log(test$duracion))
+p.Po.log.off <- predict(Po.log.off_formula1, nd , type = "response")
+p.Po.log.off2 <- predict(Po.log.off_formula2, nd , type = "response")
+
+# Funcion de perdida cuadratica
+e.Po.log_formula1 <-sum((p.Po.log_formula1 -test$numerosi)^2)#24971.62
+e.Po.id_formula1 <-sum((p.Po.id_formula1 -test$numerosi)^2)#29070.34
+e.BN.log_formula1 <-sum((p.BN.log_formula1 -test$numerosi)^2)#25015.9
+e.ZI.Po_formula1 <- sum((p.ZI.Po_formula1-test$numerosi)^2)#24937.94
+e.ZI.BN_formula1 <- sum((p.ZI.BN_formula1 -test$numerosi)^2)#24911.51 <<<<<<<<<<<<<<minimo
+e.No.id_formula1 <- sum((p.No.id_formula1 -test$numerosi)^2)#24939.38
+e.No.log_formula1 <- sum((p.No.log_formula1 -test$numerosi)^2)#25042.41
+e.Po.log.wgt_formula1 <- sum((p.Po.log.wgt_formula1 -test$numerosi)^2)#27714.04
+e.Po.log.wgt_formula2 <- sum((p.Po.log.wgt_formula2 -test$numerosi)^2)#27819.4
+
+e.base <- sum((mean(train$numerosi) -test$numerosi)^2)
+
+e.Po.log.off <- sum((p.Po.log.off -test$numerosi)^2)#29264.33
+e.Po.log.off2 <- sum((p.Po.log.off2 -test$numerosi)^2)#29372.32
+
+# Funcion de perdida valor absoluto
+a.Po.log_formula1 <- sum(abs(p.Po.log_formula1 -test$numerosi))#18850.98
+a.Po.id_formula1 <- sum(abs(p.Po.id_formula1 -test$numerosi))#25217.03
+a.BN.log_formula1 <- sum(abs(p.BN.log_formula1 -test$numerosi))#18841.11
+a.ZI.Po_formula1 <- sum(abs(p.ZI.Po_formula1-test$numerosi))#18709.85
+a.ZI.BN_formula1 <- sum(abs(p.ZI.BN_formula1 -test$numerosi))#18619.86 <<<<<<<<<<< mas bajo
+a.No.id_formula1 <- sum(abs(p.No.id_formula1 -test$numerosi))#19148.59
+a.No.log_formula1 <- sum(abs(p.No.log_formula1 -test$numerosi))#18967.53
+a.base <- sum(abs(mean(train$numerosi) -test$numerosi))#21950.58
+
+a.Po.log.off <- sum(abs(p.Po.log.off -test$numerosi))#21127.94
+a.Po.log.off2 <- sum(abs(p.Po.log.off2 -test$numerosi))#21229.52
+
+
+## Predicción básica con normalización
+
+# Predecimos con el modelo con el lambda que genera
+# el "mejor" ajuste con medida clasica
+selec <- which(No.re_glmnet$dev.ratio==max(No.re_glmnet$dev.ratio)) 
+p.No.re_glmnet <- predict.glmnet(No.re_glmnet, test.m1, type = "response")[,selec]
+
+selec <- which(Po.re_glmnet$dev.ratio==max(Po.re_glmnet$dev.ratio))
+p.Po.re_glmnet <- predict.glmnet(Po.re_glmnet, test.m1, type = "response")[,selec]
+
+selec <- which(Po.re.off_glmnet$dev.ratio==max(Po.re.off_glmnet$dev.ratio))
+p.Po.re.off_glmnet <- predict.glmnet(Po.re.off_glmnet, test.m1, newoffset = log(test$duracion),type = "response")[,selec]
+
+selec <- which.min(AIC(BN.re_mpath))
+p.BN.re_mpath <- predict(BN.re_mpath, test, which=selec, type="response")
+
+selec <- which.min(AIC(ZI.Po.re_mpath))
+p.ZI.Po.re_mpath <- predict(ZI.Po.re_mpath, test, which=selec, type="response")
+
+selec <- which.min(AIC(ZI.BN.re_mpath))
+p.ZI.BN.re_mpath <- predict(ZI.BN.re_mpath, test, which=selec, type="response")
+
+# Funcion de perdida cuadrática
+e.No.re_glmnet <- sum((p.No.re_glmnet - test$numerosi)^2)#30289.14
+
+e.Po.re_glmnet <- sum((p.Po.re_glmnet - test$numerosi)^2)#124822.5
+
+e.Po.re.off_glmnet <- sum((p.Po.re.off_glmnet - test$numerosi)^2)# Inf
+
+e.BN.re_mpath <- sum((p.BN.re_mpath - test$numerosi)^2)#24947.27 
+
+e.ZI.Po.re_mpath <- sum((p.ZI.Po.re_mpath - test$numerosi)^2)#24827.78 <<<<<<<<<<< mas bajo
+
+e.ZI.BN.re_mpath <- sum((p.ZI.BN.re_mpath - test$numerosi)^2)#24946.93
+
+
+# Funcion de perdida valor absoluto
+a.No.re_glmnet <- sum(abs(p.No.re_glmnet - test$numerosi))#22302.35
+
+a.Po.re_glmnet <- sum(abs(p.Po.re_glmnet - test$numerosi))#54136.96
+
+a.Po.re.off_glmnet <- sum(abs(p.Po.re.off_glmnet - test$numerosi))#Inf
+
+a.BN.re_mpath <- sum(abs(p.BN.re_mpath - test$numerosi))#19110.84
+
+a.ZI.Po.re_mpath <- sum(abs(p.ZI.Po.re_mpath - test$numerosi))#19053.92 <<<<<<<<<<< mas bajo
+
+a.ZI.BN.re_mpath <- sum(abs(p.ZI.BN.re_mpath - test$numerosi))#19110.88
+
+
+### Cross-Validation
+ # Prediccion
+p.cv.BN <- exp(predict(cv.BN, test))
+p.cv.BN.off <- exp(predict(cv.BN.off, newx = test,newoffset = log(test$duracion)))
+
+ # Errores cuadraticos
+e.cv.BN <- sum(abs(p.cv.BN - test$numerosi)^2)#24942.93
+e.cv.BN.off <- sum(abs(p.cv.BN.off - test$numerosi)^2)#2.45747e+142 ¿?¿?¿
+
+ # Errores cuadraticos
+a.cv.BN <- sum(abs(p.cv.BN - test$numerosi))#19111.56
+a.cv.BN.off <- sum(abs(p.cv.BN.off - test$numerosi))#2.551044e+73
+```
+
+```{r Estimaciones base tarifa, eval=FALSE, include=FALSE}
+#########
+fit1 <-
+  zeroinfl(
+    numerosi ~ Rango_Potencia + Rango_ValorVehiculo + Rango_antigüedad +
+      tipovehi + plazasvehi + Rango_Edad + Rango_Experiencia +
+      sexocondu + Rango_Permanencia + prov,
+    data = data %>% select(
+      tipovehi,
+      plazasvehi,
+      sexocondu,
+      numerosi,
+      prov,
+      Rango_Potencia,
+      Rango_ValorVehiculo,
+      Rango_Antiguedad,
+      Rango_Edad,
+      Rango_Experiencia,
+      Rango_Permanencia
+    ),
+    dist = "negbin"
+  )
+
+base.pred_fit1 <- expand.grid(
+  tipovehi =  levels(data$tipovehi),
+  plazasvehi = levels(as.factor(data$plazasvehi)),
+  sexocondu = levels(droplevels(data$sexocondu)),
+  prov = levels(data$prov),
+  Rango_Potencia = levels(data$Rango_Potencia),
+  Rango_ValorVehiculo = levels(data$Rango_ValorVehiculo),
+  Rango_antigüedad = levels(data$Rango_Antiguedad),
+  Rango_Edad = levels(data$Rango_Edad),
+  Rango_Experiencia = levels(data$Rango_Experiencia),
+  Rango_Permanencia = levels(data$Rango_Permanencia)
+)
+
+pred1 <- predict(fit1, newdata = base.pred_fit1, type = "response")
+prediccion_zeroinfl <- cbind(pred1,base.pred_fit1)
+saveRDS(object = prediccion_zeroinfl, file = "RawData/prediccion.RDS")
+```
+
+
+# Motivación
+
+El presente trabajo surge como tarea especifica de la asignatura de Ciencia de datos en Negocio del máster de Cienca de Datos de la ETSE, Escola Tècnica Superior d`Enginyeria  de la Universitat de València, para el curso 2019-20, donde se pretende estudiar la base de los modelos lineales generalizados a través del análisis de datos pertenecientes a una cartera de seguros automovilísticos.
+
+# Introducción
+
+Uno de los precursores de la Estadística moderna fue el problema de los seguros, las primeras compañías de seguros vieron en esta disciplina la herramienta perfecta para determinar las cantidades de aseguranza y riesgos que podían tomar en su cartera de negocios. Desde entonces ambas han ido de la mano, valiéndose las compañías de un aparataje estadístico cada vez más evolucionado para determinar riesgos, llegando a día de hoy en el que con unos pocos datos cualquier compañía aseguradora puede dar un precio ajustado a las características de sus clientes, evaluando el riesgo que conlleva para ellas y la función de coste-beneficio en instantes. 
+
+Hoy en día, estas empresas se han convertido en empresas enormes, incluso con calado multinacional, compitiendo en muchos y variados mercados, por lo que la adaptabilidad a los entornos debe de ser una obligación en sus estrategias de negocio. Para ello deben de contar con herramientas que puedan analizar la situación, eliminar la incertidumbre para tomar decisiones acordes a la realidad y ser competitivas. 
+
+El trabajo que a continuación se presenta sería un ejemplo de como una aseguradora debería de abordar la toma de decisiones sobre una cartera de seguros de vehículos, donde, mediante el análisis de dicha cartera y conociendo los riesgos que puede asumir, determinar qué pólizas son las más interesantes a la hora de firmarlas, ofreciendo precios competitivos, y cuales son de elevado riesgo, rechazándolas. En este trabajo analizaremos los datos de una cartera de pólizas de vehículos para modelizar la incertidumbre asociada a ella, permitiéndonos generar un modelo predictivo en base a unas pocas variables explicativas. 
+
+# Resumen
+
+A lo largo del estudio hemos realizado una búsqueda del mejor modelo para crear la base de la tarificación de la cartera de seguros. Para ello, en primer lugar, se partió el conjunto de datos en dos para poder realizar el análisis con un conjunto de entrenamiento y, después utilizar el conjunto de test con dicho modelo, observando el valor del AIC resultante, a través de las funciones de pérdida cuadrática y de valor absoluto, para encontrar aquella aproximación que mayor información nos pueda dar.
+
+De todos los modelos analizados, y que hemos sido capaces de ejecutar desde el punto de vista computacional, hemos seleccionado el ajuste sobre una distribución Binomial negativa truncada en cero por ser el que menor valor del AIC poseía. En el cuadro resumen 12 es posible ver que modelos se han comparado y los resultados obtenidos.
+
+En cuanto a la tarifa generada podemos determinar la existencia de un perfil con estimaciones de medias de números de accidentes superiores a 1 que la compañía de seguros debería de evitar o penalizar con un mayor coste la cuota de la aseguranza. Se trata de mujeres jóvenes, generalmente nobeles, cuyos vehículos son de gama media-alta. En el cuadro 13 es posible ver un resumen de los perfiles con mayores medias de números de siniestros reportados estimados por el análisis.
+
+# Análisis descriptivo
+
+En este punto vamos a estudiar todas las variables disponibles en el conjunto de datos, donde, en primera instancia, se determinará cuales de ellas son válidas para realizar el estudio y cuales no, a la vez que buscaremos la presencia de algún tipo de dato discordante, para analizarlo y evaluar su validez en el conjunto. Después, se realizará un acercamiento a todas y cada una de las variables seleccionadas, describiéndolas estadísticamente y poniéndolas en relación con la variable interés.
+
+## Preprocesado de los datos
+
+Antes de acercarnos a los datos disponibles del estudio debemos de conocer la naturaleza de estos, con el fin de decidir cuales de las variables que contiene el conjunto de datos sirven para el propósito del estudio y cuales no. La base de datos contiene las siguientes variables:
+
+- *npoliza*: identifica con un código numérico el número de la póliza.
+- *iniciop*: fecha en la que da comienzo la cobertura del seguro.
+- *finalp*: fecha en la que finaliza la cobertura del seguro.
+- *potencia*: recoge la potencia del vehículo asegurado.
+- *valorvehi*: variable con el precio estimado por la compañía del vehículo asegurado.
+- *antivehi*: antigüedad del vehículo asegurado.
+- *tipovehi*: variable categorizando el tipo del vehículo asegurado.
+- *plazasvehi*: número de plazas del vehículo asegurado.
+- *edad*: edad, en años, de la persona tomadora del seguro.
+- *anticarnet*: antigüedad, en años, del carnet de conducir del asegurado.
+- *sexocondu*: sexo del conductor/a asegurado/a.
+- *anticia*: antigüedad, en años, del asegurado/a en la compañía.
+- *codigopostal*: código postal de la residencia del asegurado/a.
+- *usovehi*: variable que tipifica el uso que se le da al vehículo.
+- *cuantiasi*: tasación de/l siniestro/s, si los hay, para cada póliza.
+- *numerosi*: número de siniestros pasados a la compañía por parte del asegurado/a.
+- *siniestro*: variable dicotómica que indica si ha habido o no siniestro en la póliza.
+- *prov*: código de la provincia en la que reside el asegurado/a.
+- *ccaa*: código de la comunidad autónoma en la que reside el asegurado/a.
+
+A priori existen ciertas variables que no sirven para el propósito de pronosticar, hablamos de las variables *siniestro*, *cuantiasi*, *usovehi* y *npoliza*, pues las dos primeras son informativas ya cuando ha habido un siniestro, la variable que tipifica el uso del vehículo no nos es nada informativa al desconocer dicha codificación, y la variable que identifica el número de póliza no aporta ningún conocimiento para este estudio. Por lo tanto, estas variables son removidas antes de que comience el estudio.
+
+Además, hemos buscado si existía algún dato discordante relacionado con la edad. Para ello hemos comprobado que tanto la edad del asegurado/a como la antigüedad del carnet de conducir está en consonancia, con el fin de eliminar aquellos datos que no tienen cabida dentro de un escenario donde el carnet del vehículo se puede obtener con la mayoría de edad, a los 18 años. Así pues, hemos encontrado un total de 91 casos donde la antigüedad declarada del carnet de conducir no es posible ante la edad declarada del asegurado/a, es decir, casos de personas jóvenes que declaran tener más tiempo el carnet de conducir que lo permitido por la administración, llegando a haber casos de personas con 18 o 19 años y con una antigüedad del carnet de más de 20 años. Ante esta situación se ha decidido removerlos del conjunto de datos al tratarse, seguramente, de datos mal imputados.
+
+En cuanto a los casos de personas de mayor edad, también hemos encontrado casos donde, a priori, no concuerdan edad y antigüedad del carnet, por ejemplo, hemos registrado casos de personas de más de 90 años con una antigüedad del carnet de tan solo 4 años. En principio, nuestra idea original sería la de eliminar todos los casos registrados de personas mayores de 70 años con una antigüedad de carnet no anterior a los 65 años, pero al no existir ninguna restricción de edad máxima para obtener el carnet de conducir en casi ningún país, la opción más cabal es la de dejar dichos datos en el conjunto de datos para analizar.
+
+Por último, también hemos detectado que para la variable sexo existen dos pólizas que incluyen la categoría "E", por ello también son removidas del conjunto, quedando así un total de `r dim(data)[1]` entradas.
+
+## Descriptiva de las variables
+
+A continuación, pasaremos a realizar un análisis descriptivo de las diferente variables con las que cuenta el banco de datos final, empenzando por la variable interés, es decir la que representa el número de siniestros por póliza, para después ir describiendo cada una de las variables explicativas disponibles.
+
+### Creación del conjunto de datos de entrenamiento y de test
+
+Una vez filtrada la base de datos disponible, eliminando de manera individual aquellos datos que presentan fuertes características discordantes con la realidad, extrayendo del conjunto global aquellas variables que no aportan, bajo nuestro juicio, información para el estudio y generando nuevas variables a raíz de la categorización de algunas de ellas, pasamos a separar el conjunto de datos en dos bloques diferenciados, uno de ellos lo utilizaremos como el conjunto de entrenamiento para los modelos de predicción que usaremos, denominado *Train* y, el otro conjunto será aquel que conjunto de datos que nos servirá para validar dichos ajustes, el cual denominaremos *Test*.
+
+Como sabemos, el conjunto inicial del banco de datos tenía 107275 entradas y 19 variables. Tras eliminar aquellos datos discordantes o no válidos para el estudio, comentados en el punto *4.1 Preprocesado de datos*, tenemos un total de `r dim(data)[1]` filas con 14 columnas que recogen las variables disponibles. 
+
+La división de los conjuntos realizada ha consistido en asignar aleatoriamente `r dim(train)[1]` entradas en el bloque de entrenamiento, ligeramente superior al 66\% del total, y de `r dim(test)[1]` para el conjunto de test, el 33\% del total. A partir de este momento se procede a trabajar únicamente con el conjunto de datos de entrenamiento, dejando a parte el conjunto de test sobre el cual implementaremos posteriormente los modelos ajustados.
+
+### Variable Número de siniestros
+
+El número de siniestros es una variable de tipo cuantitativa discreta, cuyos valores son todos iguales o mayores que 0, y que representan el número de partes o siniestros que el asegurado/a por una póliza ha pasado a la compañía aseguradora. A continuación, en el cuadro 1 se muestra un resumen de total de números de partes que se han registrado, donde es posible observar que la frecuencia de ocurrencia de los datos está más concentrada en los valores más inferiores, donde el `r round((sum(table(train$numerosi)[1:3])/dim(train)[1])*100,2)`\% de los casos registrados están entre los valores 0, 1 y 2, siendo que el número de pólizas con un reporte de siniestros de 0 es del `r round((sum(table(train$numerosi)[1])/dim(train)[1])*100,2)`\%. 
+
+```{r Tabla numeriosi, echo=FALSE}
+tablenumerosi <- as.data.frame(table(train$numerosi))
+tablenumerosi$percent <- paste(round((tablenumerosi$Freq/length(train$numerosi)*100),2),"%")
+colnames(tablenumerosi) <- c("Número siniestros", "Frecuencia", "Porcentaje")
+pander::pander(tablenumerosi, caption = "Número acumulado de siniestros reportados por el asegurado/a a la compañía de seguros dentro del conjunto de datos de entrenamiento y proporción de cada valor en tantos por ciento.")
+```
+
+Como hemos comprobado, los valores que encontramos en esta variable están muy desbalanceados, siendo los primeros lo que recogen la mayoría de casos. En el cuadro 2 podemos observar los estadísticos básicos que extraemos de esta variable, más los valores de la desviación y la varianza. 
+
+La idea que las pólizas con un número de siniestros bajo son las más representativas y que el resto de valores tienen escasa representación en el global, podemos comprobarla al observar que los valores de la mediana (`r round(summary(train$numerosi)[[3]],2)`) y de la media (`r round(mean(train$numerosi),2)`) son muy similares, ambos cercanos al cero, donde, además vemos que la varianza en esta variable, es decir, la dispersión de los datos con respecto a la media es de un valor de `r round(var(train$numerosi),4)` que, junto al valor de la desviación típica (`r round(sd(train$numerosi),2)`) nos viene a aseverar la idea de que la distribución de los datos no es simétrica, donde los datos más cercanos a 0 pesan más en este conjunto.
+
+```{r Tabla estadisticos numeriosi, echo=FALSE}
+tbl <- data.frame(
+  min = summary(train$numerosi)[[1]],
+  st1 = summary(train$numerosi)[[2]],
+  median = summary(train$numerosi)[[3]],
+  mean = summary(train$numerosi)[[4]],
+  st3 = summary(train$numerosi)[[5]],
+  max = summary(train$numerosi)[[6]],
+  sd = sd(train$numerosi),
+  var = var(train$numerosi))
+tbl <- round(tbl,3)
+colnames(tbl) <- c("Min.","1st Qu.","Median","Mean","3rd Qu.","Max.","SD","Var")
+pander::pander(tbl, caption = "Estadísticos básicos de la variable interés número de siniestros más los valores de desviación típica y varianza.")
+```
+
+A continuación, en la figura 1, podemos observar con detalle las características anteriormente citadas de la variable interés de manera visual. 
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.5\textwidth]{numerosi_barplot.png}
+\caption{Representación de la variable interés \textbf{numerosi} para el conjunto de datos de entrenamiento (\textit{Train}) con el acumulado de la frecuencia para cada número de reportes de siniestros. El valor porcentual sobre las barras representa el porcentaje de la tasa de siniestro respecto al total.}
+\label{fig1}
+\end{figure}
+
+### Variable fecha del comienzo de la cobertura de la póliza
+
+La primera de las variables explicativas que disponemos es la que hace referencia al día en el que da comienzo la cobertura de la póliza firmada. Sabemos que los datos tienen una fecha inicial en `r min(train$iniciop)` y llegan hasta el día `r max(train$iniciop)` y que, además, para los días 1 de enero de los tres años del conjunto de datos se produce un incremento del número de pólizas firmadas muy por encima de las frecuencias anuales. Esto puede ser debido a algún tipo de regularización que la compañía hace al comienzo del nuevo año.
+
+A continuación, en la figura 2, hemos realizado una representación gráfica del número de pólizas firmadas por cada uno de los días que tenemos en el conjunto de datos, eliminando de la misma los tres días de primero de año con la finalidad de poder apreciar bien la serie temporal. Tal y como se puede apreciar, durante los dos primeros años el número de pólizas que inician su cobertura está estable, rozando una media de algo menos de 20 al día. Sin embargo, a partir del comienzo del año 2001 se produce un crecimiento significativo en el número de pólizas firmadas, acercándose este año a una media de 60 pólizas diarias, aproximadamente. 
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.41\textwidth]{SerieInicio.png}
+\caption{Serie temporal con el número de pólizas firmadas por día durante el período de estudio sobre el conjunto de entrenamiento. Nótese el cambio en la tendencia a partir del comienzo del año 2001, donde el aumento de la frecuencia de firmas es notablemente significativo.}
+\label{fig222}
+\end{figure}
+
+Contemplando esta figura es posible ver cierta estacionalidad en las firmas de las nuevas pólizas, así pues, parece ser que los meses estivales son los menos proclives a la firma de nuevas pólizas, aspecto que se ve con mayor facilidad en los datos del año 2001.
+
+### Variable fecha del fin de la cobertura de la póliza
+
+Esta variable recoge la fecha en la que finaliza la cobertura de cada una de las pólizas, donde tenemos las mismas fechas de comienzo y fin de los registros que en la variable anterior. Al igual que en caso anterior, describimos visualmente el comportamiento de las fechas de finalización de las pólizas, para ello véase la siguiente figura.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.41\textwidth]{SerieFinal.png}
+\caption{Serie temporal con el número de pólizas finalizadas por día durante el período de estudio sobre el conjunto de entrenamiento. Se puede apreciar como en primero de los años estudiados tiene una mayor variabilidad en el proceso de finalización de las pólizas.}
+\end{figure}
+
+Generalmente este tipo de coberturas suele ser anual, pero al cruzar los datos entre ambas variables observamos que muchas de ellas no tienen dicha periodicidad, incluso algunas de ellas tienen una duración de 0 días. Sin poder conocer los motivos de este suceso, vemos difícil intentar estudiar la temporalidad de las altas y las bajas en las pólizas dentro de un estudio más completista, pero si que entendemos la necesidad de tomar estas variables como representativas. Aún así, creemos que el formato de estas no es lo más adecuado, por lo que generamos una variable nueva, de tipo numérica, que recoge la duración, en días, de cada uno de las pólizas estudiadas, dicha variable recibe el nombre de *duración* y se caracteriza por tener una media y una mediana muy similares, la primera de ellas es de `r round(mean(train$duracion),2)` mientras que la segunda es de `r median(train$duracion)`, por lo que comprobamos la idea que estas pólizas no tienen carácter anual en su gran mayoría, si no que parece ser que son pólizas semestrales. Por útlimo, decir que esta nueva variable tiene una correlación reseñable con nuestra variable interés, siendo el valor de esta de `r round(cor(train$numerosi, train$duracion),3)`.
+
+
+### Variable Potencia
+
+Otra de las variables explicativas con las que contamos para realizar nuestro análisis es la potencia declarada del vehículo asegurado. Al no recibir la información completa, suponemos que esta variable está expresada en CV (caballos de vapor), que es la medida habitual en el mundo automovilístico. A continuación, en el cuadro 4, podemos observar los valores de los estadísticos básicos, más la desviación y la varianza, que se desprenden de esta variable.
+
+```{r Tabla estadisticos potencia, echo=FALSE}
+tbl <- data.frame(
+  min = summary(train$potencia)[[1]],
+  st1 = summary(train$potencia)[[2]],
+  median = summary(train$potencia)[[3]],
+  mean = summary(train$potencia)[[4]],
+  st3 = summary(train$potencia)[[5]],
+  max = summary(train$potencia)[[6]],
+  sd = sd(train$potencia),
+  var = var(train$potencia))
+tbl <- round(tbl,3)
+colnames(tbl) <- c("Min.","1st Qu.","Median","Mean","3rd Qu.","Max.","SD","Var")
+pander::pander(tbl, caption = "Estadísticos básicos de la variable explicativa potencia de los vehículos más los valores de desviación típica y varianza.")
+```
+
+Tal y como podemos ver, la potencia mínima es de `r min(train$potencia)` CV y la máxima es de `r max(train$potencia)`, estando la media y la mediana muy cercanas entre sí, lo que nos indica que los datos están balanceados, aunque el alto valor de la desviación típica hace que el valor de la varianza sea muy alto. En cuanto a la relación de dicha variable interés con respecto a la variable explicativa podemos decir que la correlación es muy baja, `r round(cor(train$potencia, train$numerosi),4)`, por lo que, a priori, debemos de descartar la idea general de que a altas potencias en los vehículos mayor número de siniestros se registran.
+
+Con el fin de poder dar mayor interpretabilidad a esta variable y su relación con la variable interés, hemos creado una nueva variable que categoriza en tres rangos según la potencia a los vehículos asegurados. Así pues, hemos determinado en crear una primera categoría con los vehículos de hasta 80 CV, los vehículos a priori considerados de carácter utilitario o urbano, una segunda con los vehículos con CV no superiores a los 120 CV, es decir a los modelos de gama media, incluyendo la mayoría de vehículos familiares y SUV, y una tercera categoría con vehículos con mayores potencias, donde podemos pensar que se categorizan las berlinas, coches deportivos y, tal vez, vehículos de transporte con altas potencias. De este modo tenemos que a la primera categoría de vehículos pertenece el `r round((summary(train$Rango_Potencia)[1]/dim(train)[1])*100,2)`%, a la segunda categoría el `r round((summary(train$Rango_Potencia)[2]/dim(train)[1])*100,2)`% y a la tercera el `r round((summary(train$Rango_Potencia)[3]/dim(train)[1])*100,2)`% del total.
+
+### Variable Valor del vehículo
+
+La siguiente de las variables explicativas que vamos a revisar es aquella que contempla el valor del vehículo según la compañía aseguradora, donde desconocemos la moneda en la que se realiza esta valoración. En el siguiente cuadro tenemos descritos los valores de los estadísticos básicos, donde podemos observar que la media y la mediana poseen valores similares, siendo la mediana más pequeña que la media, por lo que intuimos que hay una presencia de vehículos altamente valorados que hacen incrementar este valor medio. El valor mínimo es de 0 y el valor máximo es de `r max(train$valorvehi)`, con una desviación típica alta y una varianza elevada. En cuanto a la correlación de esta variable con la variable interés observamos que el resultado es `r round(cor(train$valorvehi,train$numerosi),3)`, por lo tanto no parece haber una gran relación entre ambas. 
+
+```{r Tabla estadisticos valor vehiculo, echo=FALSE}
+tbl <- data.frame(
+  min = summary(train$valorvehi)[[1]],
+  st1 = summary(train$valorvehi)[[2]],
+  median = summary(train$valorvehi)[[3]],
+  mean = summary(train$valorvehi)[[4]],
+  st3 = summary(train$valorvehi)[[5]],
+  max = summary(train$valorvehi)[[6]],
+  sd = sd(train$valorvehi),
+  var = var(train$valorvehi))
+tbl <- round(tbl,3)
+colnames(tbl) <- c("Min.","1st Qu.","Median","Mean","3rd Qu.","Max.","SD","Var")
+pander::pander(tbl, caption = "Estadísticos básicos de la variable explicativa valor del vehículo más los valores de desviación típica y varianza.")
+```
+
+Al igual que en caso de la variable explicativa anterior, hemos decidido categorizar esta variable en tres rangos o categorías, dependiendo del valor en el que la compañía tasa el vehículo asegurado. Así pues tenemos una primera categoría con aquellos vehículos con una tasación inferior a 1000, un total de `r round(summary(train$Rango_ValorVehiculo)[2]/dim(train)[1]*100,2)`%, una categoría que contempla aquellos vehículos con un valor no superior a 3000, un porcentaje del `r round(summary(train$Rango_ValorVehiculo)[3]/dim(train)[1]*100,2)`% y, por último, una categoría con aquellos vehículos tasados por encima de 3000, el `r round(summary(train$Rango_ValorVehiculo)[1]/dim(train)[1]*100,2)`% del total. De este modo, podemos pensar que la gran mayoría de vehículos asegurados poseen antigüedades bajas, pues sabemos que los vehículos se deprecian rápidamente en el tiempo.
+
+### Variable antigüedad del vehículo
+
+Estudiamos ahora la variable explicativa que hace referencia a la antigüedad del vehículo asegurado, cuyos valores están en años. Relacionada con la variable explicativa del valor del vehículo (correlación del `r round(cor(train$valorvehi,train$antivehi),3)` -- a mayor antigüedad menor valor del vehículo), posee lo estadísticos básicos descritos en la siguiente tabla.
+
+```{r Tabla estadisticos antigüedad vehiculo, echo=FALSE}
+tbl <- data.frame(
+  min = summary(train$antivehi)[[1]],
+  st1 = summary(train$antivehi)[[2]],
+  median = summary(train$antivehi)[[3]],
+  mean = summary(train$antivehi)[[4]],
+  st3 = summary(train$antivehi)[[5]],
+  max = summary(train$antivehi)[[6]],
+  sd = sd(train$antivehi),
+  var = var(train$antivehi))
+tbl <- round(tbl,3)
+colnames(tbl) <- c("Min.","1st Qu.","Median","Mean","3rd Qu.","Max.","SD","Var")
+pander::pander(tbl, caption = "Estadísticos básicos de la variable explicativa antigüedad del vehículo más los valores de desviación típica y varianza.")
+```
+
+Como podemos observar existen grandes distancias entre los valores mínimos y máximos referentes a la antigüedad, donde la media y mediana están entorno a los 8 años de antigüedad. Podemos aprovechar esta variable para categorizar los vehículos en tres grupos según su antigüedad, con el fin de simplificar la información que esta variable recoge. Así pues, hemos creado un primer grupo con aquellos vehículos que podemos considerar como nuevos pues poseen una antigüedad inferior al año, este bloque está representado por un total de `r summary(train$Rango_Antiguedad)[1]`, el `r round((summary(train$Rango_Antiguedad)[1]/dim(train)[1])*100,2)`%, la segunda categoría recoge a los vehículos con una antigüedad no superior a los 10 años, un `r round((summary(train$Rango_Antiguedad)[2]/dim(train)[1])*100,2)`% del total, y, por último, aquellos vehículos usados con una antigüedad mayor a los 10 años, el `r round((summary(train$Rango_Antiguedad)[3]/dim(train)[1])*100,2)`%.
+
+### Variable Tipo del vehículo
+
+Esta variable explicativa está formada por un total de 8 categorías cuyos valores no han sido referenciados, por lo que desconocemos con que tipos corresponden y el porque. A continuación, resumimos los totales de cada categoría tratada. Como podemos ver es la categoría 100 la que alberga una cantidad de vehículos mayor que el resto, existiendo, además, un total de `r sum(train$tipovehi=="#NULL!")` vehículos no están categorizados.
+
+```{r Tabla tipo vehiculo, echo=FALSE}
+pander::pander(summary(train$tipovehi), caption = "Totales por categoría en la variable tipo de vehículo para el conjunto de datos de entrenamiento.")
+```
+
+### Variable Plazas del vehículo
+
+Esta variable explicativa recoge, en número, la cantidad de plazas disponibles para su ocupación de cada uno de los vehículos asegurados. En esta ocasión vemos como los datos están muy desbalanceados, pues del total de vehículos `r table(train$plazasvehi)[1]` tienen un total de 5 plazas y el resto, `r table(train$plazasvehi)[2]`, un `r round(table(train$plazasvehi)[2]/dim(train)[1]*100,2)`% del total de vehículos tienen 6 plazas. En cuanto a la relación con nuestra variable interés obtenemos un valor de correlación de `r round(cor(train$plazasvehi,train$numerosi),5)`, apenas reseñable. 
+
+### Variable Edad
+
+Primera de las variables explicativas centradas en el aspecto humano de la póliza, representa en años la edad del asegurado/a. En la siguiente tabla podemos observar un resumen numérico de sus principales características.
+
+```{r Tabla estadisticos edad, echo=FALSE}
+tbl <- data.frame(
+  min = summary(train$edad)[[1]],
+  st1 = summary(train$eda)[[2]],
+  median = summary(train$edad)[[3]],
+  mean = summary(train$edad)[[4]],
+  st3 = summary(train$edad)[[5]],
+  max = summary(train$edad)[[6]],
+  sd = sd(train$edad),
+  var = var(train$edad))
+tbl <- round(tbl,3)
+colnames(tbl) <- c("Min.","1st Qu.","Median","Mean","3rd Qu.","Max.","SD","Var")
+pander::pander(tbl, caption = "Estadísticos básicos de la variable explicativa edad más los valores de desviación típica y varianza.")
+```
+
+Como vemos la edad mínima corresponde con los 18 años, edad a la que en muchos países es posible acceder al permiso de conducir. También tenemos edades muy elevadas, siendo el máximo de edad de `r max(train$edad)` años. Además, tanto la media como la mediana están cercana a los 50 años, por lo que los componentes de esta cartera de seguros son, en general, adultos/as maduros/as. La relación de esta variable con la variable interés es relativamente baja, el valor de la correlación es de `r round(cor(train$edad, train$numerosi),3)`, donde podemos intuir que, en principio, a mayor edad el número de siniestros desciende.
+
+Hemos decidido también categorizar esta variable para poder aglutinar mejor la información que esta puede desprender en el conjunto de datos, creando una primera categoría con los conductores jóvenes menores de 30 años, la cual alberga el `r round(summary(train$Rango_Edad)[2]/dim(train)[1]*100,2)`% del total de pólizas, otra con aquellas personas con edades comprendidas entre los 30 y los 40 años, un `r round(summary(train$Rango_Edad)[1]/dim(train)[1]*100,2)`% del total, categorización que obedece a criterios físicos, donde las personas de este rango de edad por lo general ya son menos impulsivas que los jóvenes y no sufren de dolencias importantes, como puede ser la pérdida de visión que generalmente ocurre a partir de los 40 años de edad. En tercer lugar tenemos aquellas personas entre los 40 y los 50 años de edad, un porcentaje del `r round(summary(train$Rango_Edad)[3]/dim(train)[1]*100,2)`% en el conjunto de entrenamiento, y, por último, aquellas personas que han superado los 50 años de edad, siendo un total del `r round(summary(train$Rango_Edad)[4]/dim(train)[1]*100,2)`%, cuyos riesgos físicos son mayores que en las anteriores categorías.
+
+### Variable antigüedad del carnet
+
+Esta variable explicativa recoge el número de años que el firmante de la póliza posee un carnet de conducir. Obviamente esta variable está altamente correlacionada con la variable edad, pues se supone que personas más jóvenes poseerán antigüedades menores en el carnet de conducir, y viceversa. A continuación, hemos dispuesto una tabla resumen con los estadístico básicos de dicha variable, donde podemos observar que el grueso de conductores/as posee una experiencia al volante de aproximadamente 23 años, existiendo valores más bajos que arrastran ligueramente la media por debajo de la mediana. En cuanto a la relación de esta variable con la variable explicativa número de siniestros encontramos que tenemos una correlación del `r round(cor(train$anticarnet, train$numerosi),3)`, es decir, al aumentar la antigüedad del carnet de conducir el número de siniestros desciende, aunque en un modo poco perceptible.
+
+```{r Tabla estadisticos antigüedad carnet, echo=FALSE}
+tbl <- data.frame(
+  min = summary(train$anticarnet)[[1]],
+  st1 = summary(train$anticarnet)[[2]],
+  median = summary(train$anticarnet)[[3]],
+  mean = summary(train$anticarnet)[[4]],
+  st3 = summary(train$anticarnet)[[5]],
+  max = summary(train$anticarnet)[[6]],
+  sd = sd(train$anticarnet),
+  var = var(train$anticarnet))
+tbl <- round(tbl,3)
+colnames(tbl) <- c("Min.","1st Qu.","Median","Mean","3rd Qu.","Max.","SD","Var")
+pander::pander(tbl, caption = "Estadísticos básicos de la variable explicativa antigüedad del carnet más los valores de desviación típica y varianza.")
+```
+
+En principio podría ser una variable informativa de la experiencia del asegurado/a, pero debemos de tener en cuenta que la posesión del mismo no implica el ejercicio de conducción de manera habitual, aún así hemos decidido categorizar en tres tipos a los/las conductores/as según dicha antigüedad, de esta manera podamos resumir la información de esta variable de una manera más sencilla. Así pues, hemos categorizado como conductores nobel a aquellos con una antigüedad del carnet inferior al año, tal y como hace la administración, siendo un total del `r round(summary(train$Rango_Experiencia)[3]/dim(train)[1]*100,2)`%, una segunda categoría con clientes con una experiencia al volante no superior a los 5 años, es decir un total de `r round(summary(train$Rango_Experiencia)[1]/dim(train)[1]*100,2)`%, y, por último, aquellos conductores/as que poseen una licencia más de 5 años, un `r round(summary(train$Rango_Experiencia)[2]/dim(train)[1]*100,2)`%, tiempo más que suficiente para haber adquirido las habilidades requeridas en el manejo de vehículos.
+
+### Variable Sexo 
+
+La última de las variables explicativas relacionadas con el contratante del seguro categoriza en dos el sexo declarado del mismo, así pues, tenemos que un total de `r table(train$sexocondu)[2]` mujeres, el `r round(table(train$sexocondu)[2]/dim(train)[1]*100,2)`%, y un total de `r table(train$sexocondu)[1]` varones, el `r round(table(train$sexocondu)[1]/dim(train)[1]*100,2)`%. Nuestro conjunto de datos está muy desbalanceado a favor de los hombres, siendo una de sus posibles causas el pertenecer a un tiempo, finales del siglo XX y comienzos del siglo XXI, donde las mujeres conductoras estaban representadas por aquellas más jóvenes, debido a que el anterior período de tiempo no había incorporado a la mujer a todos los ámbitos de la sociedad, y, por lo tanto, no tenían necesidades de movilidad personal. 
+
+### Variable antigüedad en la compañía
+
+Esta variable explicativa mide, en años, los años que cada cliente lleva acumulados en la compañía aseguradora. En el siguiente cuadro vemos un resumen estadístico básico de esta variable, donde podemos ver que media y mediana difieren mucho, la primera de ellas está en `r mean(train$anticia)` años, mientras que la segunda está en `r median(train$anticia)` años, casi la mitad, lo que nos viene a dar la idea que existen valores muy altos en cuanto a la permanencia en la compañía por parte de algunos clientes que elevan este valor estadístico, pero, en general, se aprecia una permanencia de corta duración por parte de los clientes. En cuanto a la relación de esta variable explicativa con la variable interés vemos que el grado de correlación es de `r round(cor(train$anticia, train$numerosi),3)`, es decir, los clientes nuevos a priori reportan menos siniestros a su seguro.
+
+```{r Tabla estadisticos antigüedad compania, echo=FALSE}
+tbl <- data.frame(
+  min = summary(train$anticia)[[1]],
+  st1 = summary(train$anticia)[[2]],
+  median = summary(train$anticia)[[3]],
+  mean = summary(train$anticia)[[4]],
+  st3 = summary(train$anticia)[[5]],
+  max = summary(train$anticia)[[6]],
+  sd = sd(train$anticia),
+  var = var(train$anticia))
+tbl <- round(tbl,3)
+colnames(tbl) <- c("Min.","1st Qu.","Median","Mean","3rd Qu.","Max.","SD","Var")
+pander::pander(tbl, caption = "Estadísticos básicos de la variable explicativa antigüedad en la compañía más los valores de desviación típica y varianza.")
+```
+
+Con el fin de buscar mayor interpretabilidad a esta variable hemos categorizado la misma en tres categorías diferentes, por un lado aquellos clientes nuevos, con una antigüedad menor al año en la compañía, un total del  `r round(table(train$Rango_Permanencia)[3]/dim(train)[1]*100,2)`%, otra categoría con aquellos clientes consolidados que están entre un año y menos de 5, un total del `r round(table(train$Rango_Permanencia)[1]/dim(train)[1]*100,2)`%, y, por último, aquellos clientes fieles a la compañía, cuya permanencia supera los 5 años, un total del `r round(table(train$Rango_Permanencia)[2]/dim(train)[1]*100,2)`%.
+
+### Variables Administrativas
+
+Bajo este concepto aglutinamos las variables que hacen mención a aspectos administrativos relacionados con el lugar de residencia del cliente, es decir, los datos del código postal del domicilio asociado, el código identificador de la provincia y el de la comunidad autónoma a la que pertenecen. Al desconocer por completo a que país o región del mundo pertenecen estos datos no podemos indagar más en estas variables, las cuales puede albergar algún tipo de relación con el resto de las variables debido a las peculiaridades de cada uno de los lugares donde, en principio, circula el vehículo asegurado, pues entendemos que el número de siniestros estará relacionado también con las rutas habituales que se realicen, las cuales dependen mucho de la zona de ubicación.
+
+\newpage 
+
+# Análisis estadístico
+
+A partir de aquí comenzaremos el análisis estadístico sobre los datos, donde, previamente, analizaremos que la partición del banco de datos entre el conjunto de datos de entrenamiento (*Train*) y de test (*Test*) realizada aleatoriamente deja dos conjuntos representativos del global de datos, aspecto de vital importancia por que el modelo que usamos sobre nuestro conjunto de entrenamiento debe de esperar un conjunto de test lo más similar posible, con el fin de que las predicciones sean correctas. 
+
+Una vez comprobado este aspecto, pasaremos a implementar sobre nuestro conjunto de entrenamiento modelos lineales adaptables a los datos de nuestra variable respuesta, usando principalmente la familia de los modelos lineales generalizados (GLM), cuya versatilidad nos ofrece la posibilidad de implementar diversas distribuciones y *links*, además de contemplar la posibilidad de introducción de *offsets* en el modelo, generalmente en forma de variables temporales, que nos ayudarán mejor a la comprensión del problema.
+
+Por último, implementaremos los modelos al conjunto de test y decidiremos sobre cual de ellos realizar la base de nuestra tarifa de seguros, extrayendo los perfiles de mayor riesgo que la compañía pueda contener en su cartera.
+
+## Análisis partición de datos
+
+```{r Analisis correlaciones TRAIN y TEST y dataset original, include=FALSE}
+tbl <- data.frame(
+  Original = c(
+    cor(x = data$numerosi, data$potencia),
+    cor(x = data$numerosi, data$valorvehi),
+    cor(x = data$numerosi, data$antivehi),
+    cor(x = data$numerosi, data$plazasvehi),
+    cor(x = data$numerosi, data$edad),
+    cor(x = data$numerosi, data$anticarnet),
+    cor(x = data$numerosi, as.numeric(data$sexocondu)),
+    cor(x = data$numerosi, data$anticia),
+    cor(x = data$numerosi, data$duracion)),
+  Train = c(
+    cor(x = train$numerosi, train$potencia),
+    cor(x = train$numerosi, train$valorvehi),
+    cor(x = train$numerosi, train$antivehi),
+    cor(x = train$numerosi, train$plazasvehi),
+    cor(x = train$numerosi, train$edad),
+    cor(x = train$numerosi, train$anticarnet),
+    cor(x = train$numerosi, as.numeric(train$sexocondu)),
+    cor(x = train$numerosi, train$anticia),
+    cor(x = train$numerosi, train$duracion)),
+  Test = c(
+    cor(x = test$numerosi, test$potencia),
+    cor(x = test$numerosi, test$valorvehi),
+    cor(x = test$numerosi, test$antivehi),
+    cor(x = test$numerosi, test$plazasvehi),
+    cor(x = test$numerosi, test$edad),
+    cor(x = test$numerosi, test$anticarnet),
+    cor(x = test$numerosi, as.numeric(test$sexocondu)),
+    cor(x = test$numerosi, test$anticia),
+    cor(x = test$numerosi, test$duracion))
+)
+diffTrain <- round(((tbl$Train/tbl$Original)*100)-100,1)
+diffTest <- round(((tbl$Test/tbl$Original)*100)-100,1)
+
+df_tbl <- data.frame(
+  Original = round(tbl$Original,4),
+  Train = round(tbl$Train,4),
+  Dif_Train = paste(diffTrain,"%"),
+  Test = round(tbl$Test,4),
+  Dif_Test = paste(diffTest,"%")
+)
+
+rownames(df_tbl) <- c("Potencia","Valor Vehículo"," Antigüedad Vehículo", "Nº plazas", "Edad", "Antigüedad Carnet", "Sexo", "Antigüedad Compañía", "Duración póliza")
+```
+
+
+Tal y como se mencionaba en el punto *4.2.1 Creación del conjunto de datos de entrenamiento y de test*, se ha partido en dos subconjuntos la base de datos disponible con el fin de poder entrenar un modelo que sea capaz de predecir correctamente. Antes de proceder a entrenar modelos debemos comprobar si las particiones realizadas están en concordancia, lo que significa que las proporciones de las variables en cada conjunto están balanceadas y que, por tanto, a la hora de aplicar nuestro modelo entrenado con el conjunto de *train* no difiera de la realidad del conjunto de *test.* 
+
+Para ello debemos de tomar una estrategia que contemple un mínimo acercamiento al conjunto de test, pues este debe de permanecer lo máximo posible en el anonimato si queremos respetar la buena práctica. Con el fin de comprobar si estos conjuntos están en sintonía usaremos la variable interés como referencia, donde comprobaremos a través del conteo de casos y de las correlaciones con las otras variables la validez de la partición.
+
+En el cuadro 11 se muestran las correlaciones de la variable interés respecto a las principales variables explicativas, tanto en el conjunto de datos principal, columna denominada *Original*, como para los subconjuntos de entrenamiento, columna *Train*, y de test, columna *Test*. Además, se han añadido una columna recoge, en porcentaje, la variación del valor de la correlación en el conjunto de entrenamiento (columna *Dif_Train*) y del de entrenamiento (columna *Dif_Test*) respecto al conjunto original de datos.
+
+Tal y como podemos observar, no existen grandes variaciones en las nuevas correlaciones generadas con la partición, generalmente todas las diferencias registradas no son mayores del 5%, exceptuando las correlaciones obtenidas con las variables de la potencia del vehículo, su valor y el número de plazas ocupadas. Las dos primeras tienen unos valores muy similares, `r df_tbl$Dif_Train[[1]]` y `r df_tbl$Dif_Train[[2]]` de incremento respecto a la correlación del banco de datos original, registrando valores del `r df_tbl$Dif_Test[[1]]` en *Train* y del `r df_tbl$Dif_Test[[2]]` para *Test*. Sin embargo, los cambios en valores de la correlación de la variable interés con respecto a estas variables explicativas en los subconjuntos creados no nos dan a entender que dicha partición no esté aleatorizada correctamente. 
+
+En cuanto a la variable que representa el número de plazas del vehículo si que observamos unas diferencias muy elevadas entre ambos conjuntos, siendo del `r df_tbl$Dif_Train[[4]]` para el grupo de entrenamiento, y del `r df_tbl$Dif_Test[[4]]` para el de test. Recordemos que esta variable recoge el número de plazas del vehículo, de la cual sabemos que solo existían vehículos con 5 o con 6 donde, además, el total de vehículos con 6 plazas es muy pequeño, un `r round((table(data$plazasvehi)[2]/dim(data)[1])*100,2)`% del total de vehículos, por lo que es normal que la distribución de esta variable entre ambos conjuntos no esté balanceada, dando pie a estas diferencias de correlaciones respecto a la variable interés. Tanto por el valor de la correlación, cercano a 0, como por la poca importancia *a priori* de esta variable explicativa no creemos que este resultado nos lleve a pensar que el reparto aleatorio no haya sido correcto.
+
+```{r Salida tabla correlaciones, echo=FALSE, warning=TRUE}
+pander::panderOptions('table.alignment.rownames', 'left')
+pander::panderOptions('table.alignment.default', 'right')
+pander::pander(df_tbl, caption= "Correlaciones entre la variable interés **Número de siniestros** con cada una de las variables explicativas, tanto en el la base de datos original (*Original*) como en las particiones de entrenamiento (*Train*) y de test (*Test*), así como los porcentajes de las diferencias encontradas en la partición del entrenamiento (*Dif_Train*) y en el test (*Dif_Test*).")
+```
+
+Si centramos nuestro foco en la variable interés debemos de comprobar si el número de respuestas dadas en ambos conjuntos coincide entre sí, pues una partición con grandes diferencias en la variable interés nos llevaría a resultados equívocos. En el cuadro 12 mostramos el total de respuestas para cada una de los valores registrados, tanto para el conjunto de entrenamiento como para el conjunto de test, además del porcentaje de dichos valores dentro del conjunto al que pertenecen.
+
+```{r Tabla incidencias, echo=FALSE, warning=FALSE}
+tableTrain <- as.data.frame(table(train$numerosi))
+tableTest <- as.data.frame(table(test$numerosi))
+if (max(as.numeric(tableTrain$Var1)) > max(as.numeric(tableTest$Var1))) {
+  tbl <- data.frame(
+    Incidencias = tableTrain$Var1,
+    Train = tableTrain$Freq,
+    Train_Porcentaje = paste(round((tbl$Train/dim(train)[1])*100,3),"%"),
+    Test = c(ttableTest$Freq,rep(0,length(tableTrain$Var1)-length(tableTest$Var1))),
+    Test_Porcentaje = paste(c(round((tableTest$Freq/dim(train)[1])*100,3),rep(0,max(as.numeric(tableTrain$Var1)-max(as.numeric(tableTest$Var1))))),"%")
+  )
+} else {
+   tbl <- data.frame(
+    Incidencias = tableTest$Var1,
+    Train = c(tableTrain$Freq,rep(0,length(tableTest$Var1)-length(tableTrain$Var1))),
+    Train_Porcentaje = paste(c(round((tableTrain$Freq/dim(train)[1])*100,3),rep(0,max(as.numeric(tableTest$Var1)-max(as.numeric(tableTrain$Var1))))),"%"),
+    Test = tableTest$Freq,
+    Test_Porcentaje = paste(round((tableTest$Freq/dim(test)[1])*100,3),"%")
+  )
+}
+
+pander::panderOptions('table.alignment.rownames', 'left')
+pander::panderOptions('table.alignment.default', 'right')
+pander::pander(tbl, caption = "Conteo del número total de incidencias registradas para el conjunto de entrenamiento **Train** y de test **Test** más el porcentaje representativo de dicha incidencia dentro del conjunto al que pertenece." )
+```
+
+Obviamente al tener diferentes tamaños en estos dos conjuntos los valores registrados para cada uno del número de incidencias difieren, dándose el caso de tener el en conjunto de test valores que no existen en el conjunto de entrenamiento, como es el caso de tener pólizas con 12 y 13 incidentes. En proporción el reparto de los casos entre ambos conjuntos está perfectamente balanceado, pues los porcentajes en las columnas pertinentes así lo demuestran. A continuación, en la figura 4, representamos en un diagrama de barras ambos conjuntos, anotando para las mayores incidencias los porcentajes de representación en el conjunto. Con esto percibimos que la forma en la que está distribuida dicha variable en cada subconjunto es muy similar, por lo que podemos concluir de manera fehaciente que la partición del conjunto es correcta, y que los datos que usaremos para entrenar nuestros modelos predictivos están en consonancia con los datos que usaremos para el test y también con el conjunto original de datos.
+
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.5\textwidth]{TrainTest.png}
+\caption{Representación de la variable interés \textbf{Número de siniestros} para el conjunto de datos de entrenamiento (\textit{Train}) y del conjunto de test (\textit{Test}), donde son acumulados los totales de pólizas por número de siniestros registrados, yendo desde 0 hasta 13. El valor porcentual sobre las barras representa el porcentaje de la tasa de siniestro respecto a la partición.}
+\label{fig2}
+\end{figure}
+
+## Modelización
+
+Tres han sido las diferentes aproximaciones a los datos desde el punto de vista de la modelización, la primera de ellas ha sido la de utilizar los modelos lineales generalizados sin regularizar, para ello se ha escogido entre modelos con familias de distribución Poisson, Binomial negativa (BN) y con distribuciones normales (Gaussianas), a las que se les ha podido aplicar un *link* acorde a la distribución, es decir, a las distribuciones Poisson se ha usado el *link* del logaritmo y el *link identity*, mientras que a las familias gaussianas se usó el *link log* y a las familias de la binomial negativa se empleó el *link log* . Además, en algunos casos también hemos probado con utilizar la duración del contrato como un *offset* que permita mejor al modelo recoger los datos, utilizando el logaritmo de esta variable en los modelos planteados.
+
+En segundo lugar, hemos utilizado modelos con regularización pertenecientes a regresiones lineales basadas en distribuciones Poisson o Binomial negativa, penalizando la máxima verosimilitud a través de la penalización *elasticnet*. Dentro de estas, cabe reseñar que, por cuestiones de capacidad computacional, no se han podido probar todos los modelos deseados, aspecto que nos ha ocurrido en mayor tasa sobre los modelos por *cross-validation*, la tercera vía de las aproximaciones realizdas, donde tan solo hemos podido realizar uno de ellos, perteneciente a la familia binomial negativa con regularización penalizada a través de *elasticnet*.
+
+A continuación, en el cuadro 12, mostramos los resultados de los ajustes obtenidos en el conjunto de test según la función de pérdida cuadrática y la función de pérdida del valor absoluto de cada uno de los modelos testeados. El modelo con menor valor es el modelo sin regularización basado en una distribución binomial negativa truncada en cero, siendo este el que utilicemos para realizar el cálculo de la base de la tarifa de seguros.
+
+```{r Tabla resumen AICS, echo=FALSE}
+df <- data.frame(
+  Modelo = c("Modelos sin",
+                 "Regularización",#e.Po.log_formula1
+                 "",#e.Po.id_formula1
+                 "",#e.BN.log_formula1
+                 "",#e.ZI.Po_formula1
+                 "",#e.ZI.BN_formula1
+                 "",#e.No.id_formula1
+                 "",#e.No.log_formula1
+                 ####
+                 "Modelos con ",
+                 "Regularización",#e.No.re_glmnet
+                 "",#e.Po.re_glmnet
+                 "",#e.BN.re_mpath
+                 "",#e.ZI.Po.re_mpath
+                 "",#e.ZI.BN.re_mpath,
+                 ####
+                 "Cross-Validation",
+                 ""#e.cv.BN
+                 ),
+  
+  Ajuste = c("",
+                 "GLM Poisson",#e.Po.log_formula1
+                 "GLM Poisson identity ",#e.Po.id_formula1
+                 "GLM BN logarítmica",#e.BN.log_formula1
+                 "GLM Poisson truncada",#e.ZI.Po_formula1
+                 "GLM BN truncada",#e.ZI.BN_formula1
+                 "GLM Gaussiana",#e.No.id_formula1
+                 "GLM Gaussiana logarítmica",#e.No.log_formula1
+
+                 ####
+                 "",
+                 "GLM lasso",#e.No.re_glmnet
+                 "GLM Poisson elasticnet",#e.Po.re_glmnet
+                 "GLM BN lasso",#e.BN.re_mpath
+                 "GLM Poisson truncada elasticnet",#e.ZI.Po.re_mpath
+                 "GLM BN truncada elasticnet",#e.ZI.BN.re_mpath,
+                 ####
+                 "",
+                 "GLM BN elasticnet"#e.cv.BN
+                 ),
+            
+  Cuadrática = c("",
+                 24917.7,#e.Po.log_formula1
+                 30123.42,#e.Po.id_formula1
+                 24967.91,#e.BN.log_formula1
+                 24814.71,#e.ZI.Po_formula1
+                 "**24748.62**",#e.ZI.BN_formula1
+                 24886.6,#e.No.id_formula1
+                 24870.54,#e.No.log_formula1
+                 ####
+                 "",
+                 30289.14,#e.No.re_glmnet
+                 124822.5,#e.Po.re_glmnet
+                 24947.27,#e.BN.re_mpath
+                 24827.78,#e.ZI.Po.re_mpath
+                 24946.93,#e.ZI.BN.re_mpath,
+                 ####
+                 "",
+                 24942.93#e.cv.BN
+                 ),
+  
+  Absoluta = c("",19120.45,#a.Po.log_formula1
+               25821.43,#a.Po.id_formula1
+               19110.19,#a.BN.log_formula1
+               18933.29,#a.ZI.Po_formula1
+               "**18838.54**",#a.ZI.BN_formula1
+               19265.58,#a.No.id_formula1
+               19353.74,#a.No.log_formula1
+               ####
+               "",
+               22302.35,#a.No.re_glmnet
+               54136.96,#a.Po.re_glmnet
+               19110.84,#a.BN.re_mpath
+               19053.92,#a.ZI.Po.re_mpath
+               19110.88,#a.ZI.BN.re_mpath
+               ###
+               "",
+               19111.56#a.cv.BN
+               )
+)
+pander::pander(df, caption = "Resumen con los modelos ajustados por la función de pérdida cuadrática y del valor absoluto. Resaltados en negrita están los valores más bajos, que corresponden con el modelo lineal generalizado sobre una distribución binomial negativa truncada en cero." )
+```
+
+Con este modelo la base de la tarifa de seguros (véase el cuadro 13) nos indica que el perfil de mayor riesgo de reporte de accidentes es el de una mujer joven, menor de 30 años, con escasa experiencia al volante al ser una conductora nobel, que posea un vehículo con 6 plazas categorizado como semi-usado (antigüedad entre 1 y 10 años) de gama alta (valorados por encima de los 3000) y de una potencia entre los 80 y los 120 CV. Además, su permanencia en la compañía ya está en el rango de consolidado, por lo que es mayor a un año, pero inferior a cinco.
+
+
+```{r Tarifa1a, echo=FALSE}
+colnames(prediccion_zeroinfl)[1] <- "Predicción"
+pander::pander(head(prediccion_zeroinfl %>% arrange(desc(Predicción)),5) %>% dplyr::select(Predicción,sexocondu,Rango_Edad,Rango_Experiencia,prov,Rango_Permanencia),caption = "Los cinco perfiles con mayor riesgo para la cartera de seguros. La columna Predicción muestra la media de número de siniestros que el asegurado/a con este perfil reportará a la compañía." )
+```
+
+```{r Tarifa1b, echo=FALSE}
+
+pander::pander(head(prediccion_zeroinfl %>% arrange(desc(Predicción)),5) %>% dplyr::select(tipovehi,plazasvehi,Rango_Potencia,Rango_ValorVehiculo,Rango_Antiguedad))
+```
+
+El resto de perfiles de riesgo son una combinación del anterior perfil, donde varían las características referentes a la experiencia al volante del perfil y el valor del vehículo asegurado. Además, llama la atención que en todos estos perfiles se mantiene siempre el tipo de vehículo, el 120, y la provincia de residencia, la número 19. De la primera variable no podemos indagar mucho más, pues, como ya se mencionó, no disponemos de la correspondencia de esta categorización, de la segunda, al desconocer la región o país del cual están tomados los datos no podemos resolver la procedencia exacta, ni determinar si se trata de alguna zona urbana o no, pero si que queda resaltada la importancia de esta zona a la hora de predecir el número de accidentes. 
+
+En el siguiente cuadro hacemos justo lo contrario, mostramos los cinco perfiles con menor probabilidades medias de reportar un siniestro.
+
+```{r Tarifa2a, echo=FALSE}
+colnames(prediccion_zeroinfl)[1] <- "Predicción"
+pander::pander(head(prediccion_zeroinfl %>% arrange(Predicción),5) %>% dplyr::select(Predicción,sexocondu,Rango_Edad,Rango_Experiencia,prov,Rango_Permanencia),caption = "Los cinco perfiles con menor riesgo para la cartera de seguros. La columna Predicción muestra la media de número de siniestros que el asegurado/a con este perfil reportará a la compañía." )
+```
+
+```{r Tarifa2b, echo=FALSE}
+pander::pander(head(prediccion_zeroinfl %>% arrange(Predicción),5) %>% dplyr::select(tipovehi,plazasvehi,Rango_Potencia,Rango_ValorVehiculo,Rango_Antiguedad))
+```
+
+En este sentido, las predicciones más bajas de reportar accidentes pertenecen a conductores varones, de rangos de edad avanzadas, con un grado de experiencia al volante amplio, siendo clientes que llevan asegurando su vehículo en esta compañía de manera habitual por un tiempo mayor a cinco años y que, generalmente conducen vehículos de potencia baja y con antigüedades superiores a los diez años. Este tipo de perfil es el que se repite de manera constante en la base de tarificación generada, intercambiando variables referentes a la provincia de residencia, las características del vehículo o las habilidades del conductor, pero, en líneas generales este es el perfil con menor proyección de siniestros que podemos dar.
+
+# Conclusiones
+
+Una vez analizados los datos de la base de seguros de automóviles debemos de aconsejar a la compañía que evite los perfiles de riesgos anteriormente descritos, ya bien sea incrementando la base monetaria del seguro o decidiendo no renovar pólizas. Además, también deberíamos de señalar la importancia territorial, con esa provincia número 19 que permanece en todos los perfiles de riesgo. Por otro lado, aconsejamos a la compañía mantener al cliente fiel que cumpla con las características descritas en el perfil anterior, pues las medias de siniestros que reporten a la compañía son prácticamente de 0. 
+
+# Anexo
+
+Los documentos necesarios para reproducir el presente estudio están en el repositorio de GitHub:
+\centering
+https://github.com/FrankcsM/Tarificacion.git
+
+
+
+
